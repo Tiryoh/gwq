@@ -27,7 +27,7 @@ func TestHandleAddPostCreate(t *testing.T) {
 			inShim:         true,
 			stay:           true,
 			wantStdout:     "/wt/path\n",
-			wantStderrHas:  []string{"Created worktree for branch 'foo'"},
+			wantStderrHas:  []string{"Created worktree for branch 'foo'", "path: /wt/path", "from: origin/main (abc1234)"},
 			wantShellCalls: 0,
 		},
 		{
@@ -35,14 +35,14 @@ func TestHandleAddPostCreate(t *testing.T) {
 			inShim:         true,
 			autoCdOnAdd:    true,
 			wantStdout:     "/wt/path\n",
-			wantStderrHas:  []string{"Created worktree for branch 'foo'"},
+			wantStderrHas:  []string{"Created worktree for branch 'foo'", "path: /wt/path", "from: origin/main (abc1234)"},
 			wantShellCalls: 0,
 		},
 		{
 			name:           "shim+neither: stdout strictly empty",
 			inShim:         true,
 			wantStdout:     "",
-			wantStderrHas:  []string{"Created worktree for branch 'foo'"},
+			wantStderrHas:  []string{"Created worktree for branch 'foo'", "path: /wt/path", "from: origin/main (abc1234)"},
 			wantShellCalls: 0,
 		},
 		{
@@ -57,18 +57,18 @@ func TestHandleAddPostCreate(t *testing.T) {
 		{
 			name:           "nonshim+stay: launchShell called, msg on stdout",
 			stay:           true,
-			wantStdout:     "Created worktree for branch 'foo'\n",
+			wantStdout:     "Created worktree for branch 'foo'\n  path: /wt/path\n  from: origin/main (abc1234)\n",
 			wantShellCalls: 1,
 		},
 		{
 			name:           "nonshim+no stay: no shell, msg on stdout",
-			wantStdout:     "Created worktree for branch 'foo'\n",
+			wantStdout:     "Created worktree for branch 'foo'\n  path: /wt/path\n  from: origin/main (abc1234)\n",
 			wantShellCalls: 0,
 		},
 		{
 			name:           "auto_cd_on_add=true but no shim: no effect",
 			autoCdOnAdd:    true,
-			wantStdout:     "Created worktree for branch 'foo'\n",
+			wantStdout:     "Created worktree for branch 'foo'\n  path: /wt/path\n  from: origin/main (abc1234)\n",
 			wantShellCalls: 0,
 		},
 	}
@@ -95,6 +95,8 @@ func TestHandleAddPostCreate(t *testing.T) {
 					Path:      "/wt/path",
 					Stay:      tt.stay,
 					ExpiresAt: tt.expiresAt,
+					From:      "origin/main",
+					Commit:    "abc1234",
 				},
 				fakeLaunch,
 			)
@@ -109,6 +111,58 @@ func TestHandleAddPostCreate(t *testing.T) {
 			}
 			if shellCalls != tt.wantShellCalls {
 				t.Errorf("launchShell calls = %d; want %d", shellCalls, tt.wantShellCalls)
+			}
+		})
+	}
+}
+
+func TestPathShadowsRefWarning(t *testing.T) {
+	t.Parallel()
+
+	isCommit := func(ref string) bool { return ref == "origin/ros2" || ref == "main" }
+
+	tests := []struct {
+		name       string
+		path       string
+		pathExists bool
+		wantHas    []string
+	}{
+		{
+			name:    "path names a remote branch",
+			path:    "origin/ros2",
+			wantHas: []string{"'origin/ros2'", "--base origin/ros2", "./origin/ros2"},
+		},
+		{
+			name:    "path names a local branch",
+			path:    "main",
+			wantHas: []string{"'main'", "--base main"},
+		},
+		{
+			name:       "path already exists on disk",
+			path:       "origin/ros2",
+			pathExists: true,
+		},
+		{
+			name: "path is not a ref",
+			path: "../myapp-feature",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := pathShadowsRefWarning(tt.path, tt.pathExists, isCommit)
+			if len(tt.wantHas) == 0 {
+				if got != "" {
+					t.Errorf("pathShadowsRefWarning() = %q, want empty", got)
+				}
+				return
+			}
+			for _, sub := range tt.wantHas {
+				if !strings.Contains(got, sub) {
+					t.Errorf("pathShadowsRefWarning() = %q, want to contain %q", got, sub)
+				}
 			}
 		})
 	}

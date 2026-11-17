@@ -96,6 +96,9 @@ Create a new worktree.
 # Create worktree with new branch
 gwq add -b feature/new-ui
 
+# Create new branch from a specific base (default: current HEAD)
+gwq add -b feature/new-ui --base origin/main
+
 # Create from existing branch
 gwq add main
 
@@ -106,7 +109,7 @@ gwq add -i
 gwq add -s feature/new-ui
 ```
 
-**Flags**: `-b` (new branch), `-i` (interactive), `-s` (stay), `-f` (force)
+**Flags**: `-b` (new branch), `--base <ref>` (start point for `-b`), `-i` (interactive), `-s` (stay), `-f` (force)
 
 > **Note**: With shell integration and `cd.launch_shell = false`, `-s` changes the current shell's directory instead of spawning a nested shell. Set `cd.auto_cd_on_add = true` to auto-cd after every `gwq add` without `-s`.
 

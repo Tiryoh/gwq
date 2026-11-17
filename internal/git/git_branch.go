@@ -92,3 +92,19 @@ func (g *Git) getCurrentBranch(worktreePath string) string {
 	}
 	return strings.TrimSpace(output)
 }
+
+// CurrentBranch returns the branch checked out in the working directory,
+// or "HEAD" when detached.
+func (g *Git) CurrentBranch() string {
+	return g.getCurrentBranch(g.workDir)
+}
+
+// ShortCommit resolves ref to a commit and returns its abbreviated SHA.
+// It returns an error when ref does not name a commit.
+func (g *Git) ShortCommit(ref string) (string, error) {
+	output, err := g.run("rev-parse", "--verify", "--quiet", "--short", ref+"^{commit}")
+	if err != nil {
+		return "", fmt.Errorf("not a commit: %s", ref)
+	}
+	return strings.TrimSpace(output), nil
+}

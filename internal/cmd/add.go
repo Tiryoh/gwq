@@ -17,6 +17,7 @@ var (
 	addForce       bool
 	addStay        bool
 	addExpires     string
+	addBase        string
 )
 
 // addCmd represents the add command.
@@ -35,6 +36,9 @@ Use -i flag to interactively select a branch using fuzzy finder.`,
 
   # Create new branch and worktree
   gwq add -b feature/api-v2
+
+  # Create new branch from a specific base
+  gwq add -b feature/api-v2 --base origin/main
 
   # Interactive branch selection
   gwq add -i
@@ -59,6 +63,7 @@ func init() {
 	addCmd.Flags().BoolVarP(&addForce, "force", "f", false, "Overwrite existing directory")
 	addCmd.Flags().BoolVarP(&addStay, "stay", "s", false, "Stay in worktree directory after creation")
 	addCmd.Flags().StringVar(&addExpires, "expires", "", "Set expiration (e.g., 1d, 7d, 1h)")
+	addCmd.Flags().StringVar(&addBase, "base", "", "Start point for the new branch (requires -b)")
 }
 
 func runAdd(cmd *cobra.Command, args []string) error {
@@ -96,10 +101,34 @@ func runAdd(cmd *cobra.Command, args []string) error {
 			}
 		}
 
+		if addBase != "" && !addBranch {
+			return fmt.Errorf("--base requires -b")
+		}
+
+		if path != "" {
+			_, statErr := os.Stat(path)
+			isCommit := func(ref string) bool {
+				_, err := ctx.Git.ShortCommit(ref)
+				return err == nil
+			}
+			if w := pathShadowsRefWarning(path, statErr == nil, isCommit); w != "" {
+				_, _ = fmt.Fprintln(os.Stderr, w)
+			}
+		}
+
 		if path != "" && !addForce {
 			if err := ctx.WorktreeManager.ValidateWorktreePath(path); err != nil {
 				return err
 			}
+		}
+
+		// Record what the worktree is created from, for the success message.
+		from := branch
+		switch {
+		case addBase != "":
+			from = addBase
+		case addBranch:
+			from = ctx.Git.CurrentBranch()
 		}
 
 		// Validate --expires duration before creating the worktree so an
@@ -115,10 +144,17 @@ func runAdd(cmd *cobra.Command, args []string) error {
 			expiresDuration = d
 		}
 
-		worktreePath, err := ctx.WorktreeManager.Add(branch, path, addBranch)
+		var worktreePath string
+		var err error
+		if addBase != "" {
+			worktreePath, err = ctx.WorktreeManager.AddFromBase(branch, addBase, path)
+		} else {
+			worktreePath, err = ctx.WorktreeManager.Add(branch, path, addBranch)
+		}
 		if err != nil {
 			return err
 		}
+		commit, _ := ctx.Git.ShortCommit(branch)
 
 		var expiresAt *time.Time
 		if addExpires != "" {
@@ -154,6 +190,8 @@ func runAdd(cmd *cobra.Command, args []string) error {
 				Path:      worktreePath,
 				Stay:      addStay,
 				ExpiresAt: expiresAt,
+				From:      from,
+				Commit:    commit,
 			},
 			LaunchShell,
 		)
@@ -168,6 +206,8 @@ type addResult struct {
 	Path      string
 	Stay      bool
 	ExpiresAt *time.Time
+	From      string // ref the worktree was created from
+	Commit    string // abbreviated SHA of the worktree's HEAD
 }
 
 // handleAddPostCreate routes success messages and the worktree path to the
@@ -190,6 +230,10 @@ func handleAddPostCreate(
 		msgDst = stderr
 	}
 	_, _ = fmt.Fprintf(msgDst, "Created worktree for branch '%s'\n", r.Branch)
+	_, _ = fmt.Fprintf(msgDst, "  path: %s\n", r.Path)
+	if r.Commit != "" {
+		_, _ = fmt.Fprintf(msgDst, "  from: %s (%s)\n", r.From, r.Commit)
+	}
 	if r.ExpiresAt != nil {
 		_, _ = fmt.Fprintf(msgDst, "Worktree expires at %s\n", r.ExpiresAt.Format(time.RFC3339))
 	}
@@ -203,4 +247,20 @@ func handleAddPostCreate(
 	case r.Stay:
 		_ = launchShell(r.Path)
 	}
+}
+
+// pathShadowsRefWarning returns a warning when the path argument also names
+// a commit and nothing exists at that path yet. This usually means the user
+// passed a base ref as the second positional argument
+// (e.g. `gwq add -b feat origin/main`), which creates a worktree directory
+// named after the ref instead of branching from it.
+func pathShadowsRefWarning(path string, pathExists bool, isCommit func(string) bool) string {
+	if pathExists || !isCommit(path) {
+		return ""
+	}
+	return fmt.Sprintf("Warning: path '%s' is also a git ref. "+
+		"The worktree is created at that path, not branched from that ref.\n"+
+		"  To branch from it, use: --base %s\n"+
+		"  To silence this warning, write the path as: ./%s",
+		path, path, path)
 }

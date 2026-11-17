@@ -742,3 +742,45 @@ func containsWorktreeWithPath(worktrees []models.Worktree, path string) bool {
 	}
 	return false
 }
+
+func TestShortCommit(t *testing.T) {
+	repo := NewTestRepository(t)
+	g := New(repo.Path)
+
+	want, err := g.run("rev-parse", "--short", "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse: %v", err)
+	}
+	want = strings.TrimSpace(want)
+
+	t.Run("resolves branch name", func(t *testing.T) {
+		got, err := g.ShortCommit("main")
+		if err != nil {
+			t.Fatalf("ShortCommit(main) error = %v", err)
+		}
+		if got != want {
+			t.Errorf("ShortCommit(main) = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("fails for unknown ref", func(t *testing.T) {
+		if got, err := g.ShortCommit("origin/does-not-exist"); err == nil {
+			t.Errorf("ShortCommit(unknown) = %q, want error", got)
+		}
+	})
+
+	t.Run("fails for relative path syntax", func(t *testing.T) {
+		if got, err := g.ShortCommit("./main"); err == nil {
+			t.Errorf("ShortCommit(./main) = %q, want error", got)
+		}
+	})
+}
+
+func TestCurrentBranch(t *testing.T) {
+	repo := NewTestRepository(t)
+	g := New(repo.Path)
+
+	if got := g.CurrentBranch(); got != "main" {
+		t.Errorf("CurrentBranch() = %q, want main", got)
+	}
+}
